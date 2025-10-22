@@ -4,9 +4,160 @@
   <meta charset="UTF-8">
   <title>Smart Traffic Controller Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    .chart-container { width: 45%; display: inline-block; margin-right: 4%; vertical-align: top; }
+    .low { color: green; font-weight: bold; }
+    .medium { color: orange; font-weight: bold; }
+    .high { color: red; font-weight: bold; }
+    table { border-collapse: collapse; margin-top: 20px; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background-color: #f2f2f2; }
+  </style>
 </head>
 <body>
-  <h2>Smart Traffic Light Controller</h2>
-  <p>This is the base dashboard template. Charts will appear here.</p>
+  <h2>🚦 Smart Traffic Light Controller</h2>
+  <p>Dynamic signal timing with predictive queue analysis (EMA)</p>
+
+  <h3>Current Green Time Allocation</h3>
+  <ul id="green-time-list">
+    {% for inter, alloc in results.items %}
+      <li><strong>{{ inter }}</strong>:
+        {% for dir, time in alloc.items %}
+          {{ dir }} → {{ time }}s&nbsp;
+        {% endfor %}
+      </li>
+    {% endfor %}
+  </ul>
+
+  <h3>Predicted Queue (EMA)</h3>
+  <div id="prediction-charts"></div>
+
+  <h3>Recent Signal Cycles</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Intersection</th>
+        <th>Direction</th>
+        <th>Green Time (s)</th>
+        <th>Timestamp</th>
+      </tr>
+    </thead>
+    <tbody id="cycle-table-body">
+      {% for c in cycles %}
+        <tr>
+          <td>{{ c.intersection.name }}</td>
+          <td>{{ c.direction }}</td>
+          <td>{{ c.green_time }}</td>
+          <td>{{ c.cycle_timestamp|date:"M. d, Y, P" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <script>
+    const charts = {}; // Store Chart.js instances
+
+    function getColor(value) {
+      if (value < 10) return 'green';
+      if (value < 20) return 'orange';
+      return 'red';
+    }
+
+    async function fetchDashboardData() {
+      const response = await fetch("{% url 'dashboard_data_api' %}");
+      const data = await response.json();
+
+      updateGreenTimes(data.results);
+      updatePredictions(data.predictions);
+      updateCycles(data.cycles);
+    }
+
+    function updateGreenTimes(results) {
+      const ul = document.getElementById('green-time-list');
+      ul.innerHTML = '';
+      for (const inter in results) {
+        const li = document.createElement('li');
+        li.innerHTML = `<strong>${inter}</strong>: ` +
+          Object.entries(results[inter]).map(([d, t]) => `${d} → ${t}s`).join(' | ');
+        ul.appendChild(li);
+      }
+    }
+
+    function updatePredictions(predictions) {
+      const container = document.getElementById('prediction-charts');
+      container.innerHTML = '';
+      let i = 0;
+
+      for (const inter in predictions) {
+        const div = document.createElement('div');
+        div.className = 'chart-container';
+        div.innerHTML = `<canvas id="chart_${i}"></canvas><ul></ul>`;
+        container.appendChild(div);
+
+        const labels = Object.keys(predictions[inter]);
+        const values = Object.values(predictions[inter]);
+        const colors = values.map(getColor);
+
+        // Add congestion text list
+        const ul = div.querySelector('ul');
+        labels.forEach((dir, idx) => {
+          const val = values[idx];
+          let cls = val < 10 ? 'low' : val < 20 ? 'medium' : 'high';
+          const li = document.createElement('li');
+          li.className = cls;
+          li.textContent = `${dir} → ${val} vehicles (${cls.charAt(0).toUpperCase() + cls.slice(1)})`;
+          ul.appendChild(li);
+        });
+
+        // Create or update chart
+        const ctx = document.getElementById(`chart_${i}`).getContext('2d');
+        if (charts[inter]) {
+          charts[inter].data.labels = labels;
+          charts[inter].data.datasets[0].data = values;
+          charts[inter].data.datasets[0].backgroundColor = colors;
+          charts[inter].update();
+        } else {
+          charts[inter] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [{
+                label: 'Predicted Vehicle Count (EMA)',
+                data: values,
+                backgroundColor: colors,
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true,
+              scales: { y: { beginAtZero: true } },
+              plugins: { title: { display: true, text: inter }, legend: { display: false } }
+            }
+          });
+        }
+        i++;
+      }
+    }
+
+    function updateCycles(cycles) {
+      const tbody = document.getElementById('cycle-table-body');
+      tbody.innerHTML = '';
+      cycles.forEach(c => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${c.intersection}</td>
+          <td>${c.direction}</td>
+          <td>${c.green_time}</td>
+          <td>${c.timestamp}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    // Initial load and refresh every 10s
+    fetchDashboardData();
+    setInterval(fetchDashboardData, 10000);
+  </script>
 </body>
 </html>
