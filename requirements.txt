@@ -14,3 +14,4 @@ faker==37.11.0
 python-decouple==3.8
 celery==5.5.3
 redis==6.4.0
+numpy==2.2.6
