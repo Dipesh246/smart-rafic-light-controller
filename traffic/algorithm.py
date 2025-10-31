@@ -84,23 +84,27 @@ class QueuePredictor:
         Predict queue size per direction using EMA based on recent data points.
         """
         directions = ["N", "E", "S", "W"]
+        lanes = ["straight", "left", "right"]
         predictions = {}
 
         for d in directions:
-            history = TrafficData.objects.filter(
-                intersection=intersection, direction=d
-            ).order_by("-timestamp")[:limit]
+            for lane in lanes:
+                history = TrafficData.objects.filter(
+                    intersection=intersection,
+                    direction=d,
+                    lane_type=lane
+                ).order_by("-timestamp")[:limit]
 
-            if not history:
-                predictions[d] = 0
-                continue
+                if not history:
+                    predictions[f"{d}-{lane}"] = 0
+                    continue
 
-            values = [h.vehicle_count for h in reversed(history)]  # chronological order
-            ema = values[0]
-            for v in values[1:]:
-                ema = self.alpha * v + (1 - self.alpha) * ema
+                values = [h.vehicle_count for h in reversed(history)]  # chronological order
+                ema = values[0]
+                for v in values[1:]:
+                    ema = self.alpha * v + (1 - self.alpha) * ema
 
-            predictions[d] = round(ema, 2)
+                predictions[f"{d}-{lane}"] = round(ema, 2)
 
         return predictions
 

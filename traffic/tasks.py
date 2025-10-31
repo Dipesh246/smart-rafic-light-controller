@@ -1,28 +1,33 @@
-import random
 from celery import shared_task
 from django.utils import timezone
-from .models import TrafficData, Intersection
-from .algorithm import DynamicSignalController
+import random
+from collections import defaultdict
+from .models import Intersection, TrafficData, SignalCycle
+from .algorithm import QueuePredictor, SignalAllocator
 
 
-@shared_task
+DIRECTIONS = ["N", "E", "S", "W"]
+LANES = ["straight", "left", "right"]
+
+
+@shared_task()
 def generate_traffic_data():
-    directions = ["N", "E", "S", "W"]
     intersections = Intersection.objects.all()
-
+    results = defaultdict(dict)
     for inter in intersections:
-        for d in directions:
-            count = random.randint(0, 40)  # random load simulation
-            TrafficData.objects.create(
-                intersection=inter,
-                direction=d,
-                vehicle_count=count,
-                timestamp=timezone.now(),
-            )
+        for direction in DIRECTIONS:
+            for lane in LANES:
+                TrafficData.objects.create(
+                    intersection=inter,
+                    direction=direction,
+                    lane_type=lane,
+                    vehicle_count=random.randint(5, 40)
+                )
+    print("Traffic data generated")
     return "Traffic data generated"
 
 
-@shared_task
+@shared_task()
 def run_signal_algorithm():
     controller = DynamicSignalController()
     results = controller.run_for_all()

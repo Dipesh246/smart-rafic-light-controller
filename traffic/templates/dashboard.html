@@ -17,7 +17,7 @@
 </head>
 <body>
   <h2>🚦 Smart Traffic Light Controller</h2>
-  <p>Dynamic signal timing with predictive queue analysis (EMA)</p>
+  <p>Dynamic signal timing with predictive queue analysis (EMA, lane-aware)</p>
 
   <h3>Current Green Time Allocation</h3>
   <ul id="green-time-list">
@@ -30,7 +30,7 @@
     {% endfor %}
   </ul>
 
-  <h3>Predicted Queue (EMA)</h3>
+  <h3>Predicted Queue (EMA, Direction + Lane)</h3>
   <div id="prediction-charts"></div>
 
   <h3>Recent Signal Cycles</h3>
@@ -56,7 +56,7 @@
   </table>
 
   <script>
-    const charts = {}; // Store Chart.js instances
+    const charts = {}; // store Chart.js instances
 
     function getColor(value) {
       if (value < 10) return 'green';
@@ -65,12 +65,15 @@
     }
 
     async function fetchDashboardData() {
-      const response = await fetch("{% url 'dashboard_data_api' %}");
-      const data = await response.json();
-
-      updateGreenTimes(data.results);
-      updatePredictions(data.predictions);
-      updateCycles(data.cycles);
+      try {
+        const response = await fetch("{% url 'dashboard_data_api' %}");
+        const data = await response.json();
+        updateGreenTimes(data.results);
+        updatePredictions(data.predictions);
+        updateCycles(data.cycles);
+      } catch (err) {
+        console.error("Error fetching dashboard data:", err);
+      }
     }
 
     function updateGreenTimes(results) {
@@ -87,12 +90,12 @@
     function updatePredictions(predictions) {
       const container = document.getElementById('prediction-charts');
       container.innerHTML = '';
-      let i = 0;
+      let chartCount = 0;
 
       for (const inter in predictions) {
         const div = document.createElement('div');
         div.className = 'chart-container';
-        div.innerHTML = `<canvas id="chart_${i}"></canvas><ul></ul>`;
+        div.innerHTML = `<canvas id="chart_${chartCount}"></canvas><ul></ul>`;
         container.appendChild(div);
 
         const labels = Object.keys(predictions[inter]);
@@ -101,42 +104,39 @@
 
         // Add congestion text list
         const ul = div.querySelector('ul');
-        labels.forEach((dir, idx) => {
+        labels.forEach((lane, idx) => {
           const val = values[idx];
           let cls = val < 10 ? 'low' : val < 20 ? 'medium' : 'high';
           const li = document.createElement('li');
           li.className = cls;
-          li.textContent = `${dir} → ${val} vehicles (${cls.charAt(0).toUpperCase() + cls.slice(1)})`;
+          li.textContent = `${lane} → ${val} vehicles (${cls.charAt(0).toUpperCase() + cls.slice(1)})`;
           ul.appendChild(li);
         });
 
-        // Create or update chart
-        const ctx = document.getElementById(`chart_${i}`).getContext('2d');
-        if (charts[inter]) {
-          charts[inter].data.labels = labels;
-          charts[inter].data.datasets[0].data = values;
-          charts[inter].data.datasets[0].backgroundColor = colors;
-          charts[inter].update();
-        } else {
-          charts[inter] = new Chart(ctx, {
-            type: 'bar',
-            data: {
-              labels: labels,
-              datasets: [{
-                label: 'Predicted Vehicle Count (EMA)',
-                data: values,
-                backgroundColor: colors,
-                borderWidth: 1
-              }]
-            },
-            options: {
-              responsive: true,
-              scales: { y: { beginAtZero: true } },
-              plugins: { title: { display: true, text: inter }, legend: { display: false } }
+        // Build Chart.js bar chart
+        const ctx = document.getElementById(`chart_${chartCount}`).getContext('2d');
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Predicted Vehicle Count (EMA, per-lane)',
+              data: values,
+              backgroundColor: colors,
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true } },
+            plugins: {
+              title: { display: true, text: inter },
+              legend: { display: false }
             }
-          });
-        }
-        i++;
+          }
+        });
+
+        chartCount++;
       }
     }
 
@@ -155,7 +155,7 @@
       });
     }
 
-    // Initial load and refresh every 10s
+    // Load once and refresh every 10s
     fetchDashboardData();
     setInterval(fetchDashboardData, 10000);
   </script>
