@@ -17,8 +17,9 @@
 </head>
 <body>
   <h2>🚦 Smart Traffic Light Controller</h2>
-  <p>Dynamic signal timing with predictive queue analysis (EMA, lane-aware)</p>
+  <p>Dynamic signal timing with predictive queue analysis (EMA, Lane-Aware)</p>
 
+  <!-- ===================== Green Time ===================== -->
   <h3>Current Green Time Allocation</h3>
   <ul id="green-time-list">
     {% for inter, alloc in results.items %}
@@ -30,9 +31,11 @@
     {% endfor %}
   </ul>
 
-  <h3>Predicted Queue (EMA, Direction + Lane)</h3>
+  <!-- ===================== Prediction Charts ===================== -->
+  <h3>Predicted Queue (EMA per Direction + Lane)</h3>
   <div id="prediction-charts"></div>
 
+  <!-- ===================== Recent Cycles ===================== -->
   <h3>Recent Signal Cycles</h3>
   <table>
     <thead>
@@ -56,108 +59,125 @@
   </table>
 
   <script>
-    const charts = {}; // store Chart.js instances
+  const charts = {}; // to store chart instances
 
-    function getColor(value) {
-      if (value < 10) return 'green';
-      if (value < 20) return 'orange';
-      return 'red';
-    }
+  function getColor(value) {
+    if (value < 50) return 'green';
+    if (value < 120) return 'orange';
+    return 'red';
+  }
 
-    async function fetchDashboardData() {
-      try {
-        const response = await fetch("{% url 'dashboard_data_api' %}");
-        const data = await response.json();
+  async function fetchDashboardData() {
+    try {
+      const response = await fetch("{% url 'dashboard_data_api' %}");
+      const data = await response.json();
+
+      if (data.results && data.predictions) {
         updateGreenTimes(data.results);
         updatePredictions(data.predictions);
         updateCycles(data.cycles);
-      } catch (err) {
-        console.error("Error fetching dashboard data:", err);
+      } else {
+        console.warn("Incomplete data:", data);
       }
+    } catch (err) {
+      console.error("Error fetching dashboard data:", err);
     }
+  }
 
-    function updateGreenTimes(results) {
-      const ul = document.getElementById('green-time-list');
-      ul.innerHTML = '';
-      for (const inter in results) {
+  function updateGreenTimes(results) {
+    const ul = document.getElementById('green-time-list');
+    ul.innerHTML = '';
+    for (const inter in results) {
+      const li = document.createElement('li');
+      li.innerHTML = `<strong>${inter}</strong>: ` +
+        Object.entries(results[inter])
+          .map(([d, t]) => `${d} → ${t}s`)
+          .join(' | ');
+      ul.appendChild(li);
+    }
+  }
+
+  function updatePredictions(predictions) {
+    const container = document.getElementById('prediction-charts');
+    container.innerHTML = '';
+
+    let chartCount = 0;
+
+    for (const inter in predictions) {
+      const interData = predictions[inter];
+      if (!interData || Object.keys(interData).length === 0) continue;
+
+      const div = document.createElement('div');
+      div.className = 'chart-container';
+      div.innerHTML = `<canvas id="chart_${chartCount}"></canvas><ul></ul>`;
+      container.appendChild(div);
+
+      const labels = Object.keys(interData);
+      const values = Object.values(interData);
+      const colors = values.map(getColor);
+
+      // Display text-based congestion levels
+      const ul = div.querySelector('ul');
+      labels.forEach((lane, idx) => {
+        const val = values[idx];
+        let cls = val < 50 ? 'low' : val < 120 ? 'medium' : 'high';
         const li = document.createElement('li');
-        li.innerHTML = `<strong>${inter}</strong>: ` +
-          Object.entries(results[inter]).map(([d, t]) => `${d} → ${t}s`).join(' | ');
+        li.className = cls;
+        li.textContent = `${lane} → ${val} vehicles (${cls.toUpperCase()})`;
         ul.appendChild(li);
-      }
-    }
-
-    function updatePredictions(predictions) {
-      const container = document.getElementById('prediction-charts');
-      container.innerHTML = '';
-      let chartCount = 0;
-
-      for (const inter in predictions) {
-        const div = document.createElement('div');
-        div.className = 'chart-container';
-        div.innerHTML = `<canvas id="chart_${chartCount}"></canvas><ul></ul>`;
-        container.appendChild(div);
-
-        const labels = Object.keys(predictions[inter]);
-        const values = Object.values(predictions[inter]);
-        const colors = values.map(getColor);
-
-        // Add congestion text list
-        const ul = div.querySelector('ul');
-        labels.forEach((lane, idx) => {
-          const val = values[idx];
-          let cls = val < 10 ? 'low' : val < 20 ? 'medium' : 'high';
-          const li = document.createElement('li');
-          li.className = cls;
-          li.textContent = `${lane} → ${val} vehicles (${cls.charAt(0).toUpperCase() + cls.slice(1)})`;
-          ul.appendChild(li);
-        });
-
-        // Build Chart.js bar chart
-        const ctx = document.getElementById(`chart_${chartCount}`).getContext('2d');
-        new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: labels,
-            datasets: [{
-              label: 'Predicted Vehicle Count (EMA, per-lane)',
-              data: values,
-              backgroundColor: colors,
-              borderWidth: 1
-            }]
-          },
-          options: {
-            responsive: true,
-            scales: { y: { beginAtZero: true } },
-            plugins: {
-              title: { display: true, text: inter },
-              legend: { display: false }
-            }
-          }
-        });
-
-        chartCount++;
-      }
-    }
-
-    function updateCycles(cycles) {
-      const tbody = document.getElementById('cycle-table-body');
-      tbody.innerHTML = '';
-      cycles.forEach(c => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${c.intersection}</td>
-          <td>${c.direction}</td>
-          <td>${c.green_time}</td>
-          <td>${c.timestamp}</td>
-        `;
-        tbody.appendChild(row);
       });
-    }
 
-    // Load once and refresh every 10s
-    fetchDashboardData();
-    setInterval(fetchDashboardData, 10000);
-  </script>
+      const ctx = document.getElementById(`chart_${chartCount}`).getContext('2d');
+
+      // Destroy old chart if exists
+      if (charts[`chart_${chartCount}`]) {
+        charts[`chart_${chartCount}`].destroy();
+      }
+
+      charts[`chart_${chartCount}`] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Predicted Vehicle Count (EMA per Lane)',
+            data: values,
+            backgroundColor: colors,
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true } },
+          plugins: {
+            title: { display: true, text: inter },
+            legend: { display: false }
+          }
+        }
+      });
+
+      chartCount++;
+    }
+  }
+
+  function updateCycles(cycles) {
+    const tbody = document.getElementById('cycle-table-body');
+    tbody.innerHTML = '';
+    cycles.forEach(c => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${c.intersection}</td>
+        <td>${c.direction}</td>
+        <td>${c.green_time}</td>
+        <td>${c.timestamp}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  // Initial load + refresh every 10 seconds
+  fetchDashboardData();
+  setInterval(fetchDashboardData, 10000);
+</script>
+
 </body>
 </html>

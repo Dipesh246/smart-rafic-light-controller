@@ -1,6 +1,9 @@
 from traffic.models import Intersection, TrafficData, SignalCycle
 from django.utils import timezone
+from datetime import datetime
+import numpy as np
 from collections import defaultdict
+from .constants import DIRECTIONS, LANES, LANE_WEIGHTS, LANE_FLOW_RATES
 
 
 class DynamicSignalController:
@@ -20,37 +23,42 @@ class DynamicSignalController:
         """
         Compute and store green times for all directions at one intersection.
         """
-        directions = ["N", "E", "S", "W"]
-        recent_data = {
-            d: TrafficData.objects.filter(intersection=intersection, direction=d)
-            .order_by("-timestamp")
-            .first()
-            for d in directions
-        }
+        direction_loads = defaultdict(float)
 
-        # Replace None with zero counts
-        vehicle_counts = {
-            d: (recent_data[d].vehicle_count if recent_data[d] else 0)
-            for d in directions
-        }
-        total = sum(vehicle_counts.values())
+        for direction in DIRECTIONS:
+            lane_data = TrafficData.objects.filter(
+                intersection=intersection,
+                direction=direction,
+            ).order_by("-timestamp")[:3]
+
+            # Aggregate by lane
+            lane_counts = defaultdict(int)
+            for record in lane_data:
+                lane_counts[record.lane_type] += record.vehicle_count
+
+            # Weighted load per direction
+            total_weighted = sum(
+                lane_counts.get(l, 0) * LANE_WEIGHTS.get(l, 1) for l in LANES
+            )
+            direction_loads[direction] = total_weighted
+
+        total = sum(direction_loads.values())
 
         if total == 0:
-            # No traffic — equal minimal timing
-            allocation = {d: self.cycle_time / 4 for d in directions}
+            allocation = {d: round(self.cycle_time / 4, 2) for d in DIRECTIONS}
         else:
             allocation = {
-                d: max((count / total) * self.cycle_time, self.min_green)
-                for d, count in vehicle_counts.items()
+                d: max(round((count / total) * self.cycle_time, 2), self.min_green)
+                for d, count in direction_loads.items()
             }
 
-        # Normalize if total exceeds cycle time (after min_green adjustments)
+        # Normalize to ensure total doesn’t exceed cycle time
         total_alloc = sum(allocation.values())
         if total_alloc > self.cycle_time:
             factor = self.cycle_time / total_alloc
-            allocation = {d: round(t * factor, 2) for d, t in allocation.items()}
+            allocation = {d: round(v * factor, 2) for d, v in allocation.items()}
 
-        # Store results
+        # Log signal cycles (still direction-level)
         for direction, green_time in allocation.items():
             SignalCycle.objects.create(
                 intersection=intersection,
@@ -66,8 +74,8 @@ class DynamicSignalController:
         Run the dynamic algorithm for all intersections.
         """
         results = {}
-        for intersection in Intersection.objects.all():
-            results[intersection.name] = self.compute_for_intersection(intersection)
+        for inter in Intersection.objects.all():
+            results[inter.name] = self.compute_for_intersection(inter)
         return results
 
 
@@ -90,16 +98,16 @@ class QueuePredictor:
         for d in directions:
             for lane in lanes:
                 history = TrafficData.objects.filter(
-                    intersection=intersection,
-                    direction=d,
-                    lane_type=lane
+                    intersection=intersection, direction=d, lane_type=lane
                 ).order_by("-timestamp")[:limit]
 
                 if not history:
                     predictions[f"{d}-{lane}"] = 0
                     continue
 
-                values = [h.vehicle_count for h in reversed(history)]  # chronological order
+                values = [
+                    h.vehicle_count for h in reversed(history)
+                ]  # chronological order
                 ema = values[0]
                 for v in values[1:]:
                     ema = self.alpha * v + (1 - self.alpha) * ema

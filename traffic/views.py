@@ -1,4 +1,5 @@
 import json
+import random
 from django.http import JsonResponse
 from django.utils.formats import date_format
 from django.utils.safestring import mark_safe
@@ -14,7 +15,7 @@ def dashboard_view(request):
     results = controller.run_for_all()
     predictions = predictor.run_for_all()
 
-    # Serialize predictions to JSON
+    # Serialize predictions safely
     predictions_json = mark_safe(json.dumps(predictions))
 
     latest_cycles = SignalCycle.objects.order_by("-cycle_timestamp")[:20]
@@ -36,6 +37,13 @@ def dashboard_data_api(request):
 
     results = controller.run_for_all()
     predictions = predictor.run_for_all()
+
+    # Optional: simulate live fluctuations
+    for inter, lanes in predictions.items():
+        for lane, count in lanes.items():
+            delta = random.randint(-3, 3)
+            predictions[inter][lane] = max(count + delta, 0)
+
     latest_cycles = SignalCycle.objects.order_by("-cycle_timestamp")[:20]
 
     data = {
@@ -46,9 +54,10 @@ def dashboard_data_api(request):
                 "intersection": c.intersection.name,
                 "direction": c.direction,
                 "green_time": round(c.green_time, 2),
-                "timestamp": date_format(c.cycle_timestamp, "N j, Y, P"), 
+                "timestamp": date_format(c.cycle_timestamp, "N j, Y, P"),
             }
             for c in latest_cycles
         ],
     }
+
     return JsonResponse(data)
