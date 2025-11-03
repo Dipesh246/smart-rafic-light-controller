@@ -2,7 +2,7 @@
 college 8th sem final project
 
 # Project setup
-1. to start the roject install postgresql for database
+1. to start the project install postgresql for database
 2. install redis 
 3. install python > 3.10
 4. create virtual environment
