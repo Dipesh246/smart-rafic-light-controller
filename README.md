@@ -24,4 +24,4 @@ college 8th sem final project
 11. Start the Celery beat by running:
         - celery -A config beat -l info
 
-# Note eun python, celery and celery-beat commands in seprate terminals
+# Note run python, celery and celery-beat commands in seprate terminals
