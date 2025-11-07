@@ -52,3 +52,9 @@ def run_signal_algorithm():
     controller = DynamicSignalController()
     results = controller.run_for_all()
     return results
+
+@shared_task()
+def retrain_queue_model():
+    predictor = QueuePredictor()
+    predictor.ml.train_model()
+    return "Model retrained successfully"

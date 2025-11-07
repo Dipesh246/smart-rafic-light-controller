@@ -36,6 +36,10 @@ def dashboard_data_api(request):
     predictor = QueuePredictor()
 
     results = controller.run_for_all()
+
+    ml_preds = predictor.ml.run_for_all() if predictor.ml.is_available() else {}
+    ema_preds = predictor.ema.run_for_all()
+
     predictions = predictor.run_for_all()
 
     # Optional: simulate live fluctuations
@@ -49,6 +53,8 @@ def dashboard_data_api(request):
     data = {
         "results": results,
         "predictions": predictions,
+        "ml_predictions": ml_preds,
+        "ema_predictions": ema_preds,
         "cycles": [
             {
                 "intersection": c.intersection.name,
