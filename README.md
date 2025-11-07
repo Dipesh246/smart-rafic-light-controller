@@ -22,6 +22,6 @@ college 8th sem final project
      -  celery -A config worker --pool=solo -l info (Windows)
      -  celery -A config worker -l info (linux or mac)
 11. Start the Celery beat by running:
-        - celery -A config beat -l info
+        - celery -A config beat -S django --loglevel=info
 
 # Note run python, celery and celery-beat commands in seprate terminals
