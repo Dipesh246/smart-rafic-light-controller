@@ -2,6 +2,7 @@ from traffic.models import Intersection, TrafficData, SignalCycle
 from django.utils import timezone
 from datetime import datetime
 import numpy as np
+import pandas as pd
 from collections import defaultdict
 from .constants import DIRECTIONS, LANES, LANE_WEIGHTS, LANE_FLOW_RATES
 from .ml_predictor import MLQueuePredictor
@@ -130,104 +131,15 @@ class QueuePredictorEMA:
 
 class QueuePredictor:
     """
-    New QueuePredictor: prefer ML predictions, fall back to EMA if ML not available.
+    Wrapper combining ML and EMA predictors.
+    Prefers ML; falls back to EMA if unavailable.
     """
-
-    model_path = "ml_models/queue_predictor.pkl"
 
     def __init__(self, alpha=0.3):
         self.ml = MLQueuePredictor()
         self.ema = QueuePredictorEMA(alpha=alpha)
-        self.direction_map = {"N": 0, "E": 1, "S": 2, "W": 3}
-        self.lane_map = {"straight": 0, "left": 1, "right": 2}
-
-    def predict_for_intersection(self, intersection, limit=10):
-        if self.ml.is_available():
-            preds = self.ml.predict_for_intersection(intersection, limit=limit)
-            # sanity: if ML returned empty, fallback to EMA
-            if preds:
-                return preds
-        # fallback
-        return self.ema.predict_for_intersection(intersection, limit=limit)
-
-    def train_model(self):
-        data = TrafficData.objects.all().order_by("-timestamp")[:5000]
-        if not data.exists():
-            print("⚠️ No data available for training.")
-            return
-
-        X, y = [], []
-
-        for d in data:
-            # Feature 1: vehicle count
-            vehicle_count = d.vehicle_count
-
-            # Feature 2: encoded direction (N=0, E=1, S=2, W=3)
-            dir_code = self.direction_map.get(d.direction, -1)
-
-            # Feature 3: encoded lane type (straight=0, left=1, right=2)
-            lane_code = self.lane_map.get(d.lane_type, -1)
-
-            # Feature 4: time of day as hour (0–23)
-            hour = d.timestamp.hour
-
-            # Feature 5: weekday/weekend binary
-            is_weekend = 1 if d.timestamp.weekday() >= 5 else 0
-
-            # Target variable (approximate "queue length")
-            # You can later replace this with measured queue length if available
-            estimated_queue = vehicle_count * np.random.uniform(0.7, 1.3)
-
-            X.append([vehicle_count, dir_code, lane_code, hour, is_weekend])
-            y.append(estimated_queue)
-
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
-        model = RandomForestRegressor(
-            n_estimators=150,
-            max_depth=10,
-            random_state=42,
-            n_jobs=-1,
-        )
-        model.fit(X_train, y_train)
-
-        preds = model.predict(X_test)
-        mae = mean_absolute_error(y_test, preds)
-
-        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
-        joblib.dump(model, self.model_path)
-
-        print(f"✅ Model trained and saved at {self.model_path}")
-        print(f"📊 Mean Absolute Error (validation): {mae:.2f}")
 
     def run_for_all(self):
-        if not os.path.exists(self.model_path):
-            print("⚠️ Model not found. Please train it first.")
-            return {}
-
-        model = joblib.load(self.model_path)
-        predictions = {}
-
-        # Take recent data to simulate real-time prediction
-        recent_data = TrafficData.objects.order_by("-timestamp")[:200]
-
-        for record in recent_data:
-            features = np.array(
-                [
-                    record.vehicle_count,
-                    self.direction_map.get(record.direction, -1),
-                    self.lane_map.get(record.lane_type, -1),
-                    record.timestamp.hour,
-                    1 if record.timestamp.weekday() >= 5 else 0,
-                ]
-            ).reshape(1, -1)
-
-            predicted_queue = model.predict(features)[0]
-
-            intersection = record.intersection.name
-            key = f"{record.direction}-{record.lane_type}"
-
-            predictions.setdefault(intersection, {})[key] = round(predicted_queue, 2)
-
-        return predictions
+        if self.ml.is_available():
+            return self.ml.run_for_all()
+        return self.ema.run_for_all()

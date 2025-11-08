@@ -3,6 +3,8 @@ import os, sys
 import django
 import joblib
 import pandas as pd
+from datetime import timedelta
+from django.utils import timezone
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
@@ -22,7 +24,8 @@ ARTIFACT_DIR = os.path.join(os.path.dirname(__file__), "..", "traffic", "ml_arti
 os.makedirs(ARTIFACT_DIR, exist_ok=True)
 
 # ------------- Load data from DB -------------
-qs = TrafficData.objects.all().values(
+cutoff = timezone.now() - timedelta(days=1)
+qs = TrafficData.objects.filter(timestamp__gte=cutoff).values(
     "intersection__name", "direction", "lane_type", "vehicle_count", "timestamp"
 )
 df = pd.DataFrame(list(qs))

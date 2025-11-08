@@ -10,7 +10,7 @@ from traffic.models import Intersection, TrafficData
 
 # path to artifacts (adjust if different)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # project/traffic
-ARTIFACT_DIR = os.path.join(BASE_DIR, "ml_artifacts")
+ARTIFACT_DIR = os.path.join(BASE_DIR, "traffic\ml_artifacts")
 MODEL_PATH = os.path.join(ARTIFACT_DIR, "rf_queue_model.joblib")
 LE_INTER_PATH = os.path.join(ARTIFACT_DIR, "le_intersection.joblib")
 LE_DIRLANE_PATH = os.path.join(ARTIFACT_DIR, "le_dirlane.joblib")
@@ -57,13 +57,12 @@ class MLQueuePredictor:
 
     def predict_for_intersection(self, intersection: Intersection, limit=10):
         """
-        Predicts next vehicle count per 'direction-lane' key for an intersection.
-        Returns dict like {'N-straight': 12.34, ...}
+        Predicts next vehicle count per direction-lane key for an intersection.
+        Clamps predictions to [0, 50] to avoid outliers.
         """
         if not self.is_available():
             return {}
 
-        # gather the latest observed vehicle_count per dir-lane
         directions = ["N", "E", "S", "W"]
         lanes = ["straight", "left", "right"]
         preds = {}
@@ -71,12 +70,15 @@ class MLQueuePredictor:
         for d in directions:
             for lane in lanes:
                 key = f"{d}-{lane}"
-                # get last observed vehicle_count for this dir+lane
-                last = TrafficData.objects.filter(
-                    intersection=intersection,
-                    direction=d,
-                    lane_type=lane
-                ).order_by("-timestamp").first()
+
+                # Get latest observed value
+                last = (
+                    TrafficData.objects.filter(
+                        intersection=intersection, direction=d, lane_type=lane
+                    )
+                    .order_by("-timestamp")
+                    .first()
+                )
 
                 if last:
                     vc = last.vehicle_count
@@ -86,19 +88,21 @@ class MLQueuePredictor:
                     ts = timezone.localtime(timezone.now())
 
                 feat = self._build_feature_row(intersection.name, key, vc, ts)
-                # handle unknown encoding: model expects numeric; we set -1 for unknowns
                 X = np.array([feat], dtype=float)
-                # predict
+
                 try:
                     pred = float(self.model.predict(X)[0])
-                    if pred < 0:
-                        pred = 0.0
-                except Exception as e:
-                    # prediction failed -> fallback to current count
+                except Exception:
+                    # Fallback if prediction fails
                     pred = vc
+
+                # ✅ Clamp to realistic range
+                pred = max(0.0, min(pred, 50.0))
+
                 preds[key] = round(pred, 2)
 
         return preds
+
 
     def run_for_all(self):
         results = defaultdict(dict)

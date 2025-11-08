@@ -46,3 +46,22 @@ class SignalCycle(models.Model):
 
     def __str__(self):
         return f"{self.intersection.name} - {self.direction} ({self.green_time}s)"
+
+
+class MLTrainingLog(models.Model):
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=[
+        ("running", "Running"),
+        ("success", "Success"),
+        ("failed", "Failed"),
+    ])
+    mae = models.FloatField(null=True, blank=True)
+    r2 = models.FloatField(null=True, blank=True)
+    error_message = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"Training ({self.status}) @ {self.started_at:%Y-%m-%d %H:%M:%S}"

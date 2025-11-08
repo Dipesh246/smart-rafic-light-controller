@@ -13,6 +13,12 @@
     table { border-collapse: collapse; margin-top: 20px; width: 100%; }
     th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
     th { background-color: #f2f2f2; }
+    .chart-container canvas {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      padding: 10px;
+    }
   </style>
 </head>
 <body>
@@ -35,6 +41,56 @@
   <h3>Predicted Queue (EMA per Direction + Lane)</h3>
   <div id="prediction-charts"></div>
 
+  <div class="card mt-4">
+    <h5 class="card-title text-center">ML Model Performance</h5>
+    <canvas id="mlMetricsChart" height="100"></canvas>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+async function loadTrainingMetrics() {
+    const res = await fetch("{% url 'training_metrics_api' %}");
+    const data = await res.json();
+
+    const ctx = document.getElementById('mlMetricsChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.timestamps,
+            datasets: [
+                {
+                    label: 'MAE',
+                    data: data.mae,
+                    borderColor: 'rgb(255, 99, 132)',
+                    fill: false,
+                    tension: 0.3,
+                },
+                {
+                    label: 'R²',
+                    data: data.r2,
+                    borderColor: 'rgb(54, 162, 235)',
+                    fill: false,
+                    tension: 0.3,
+                },
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'top' },
+                title: {
+                    display: true,
+                    text: 'Model Accuracy Over Time (Last 10 Retrains)'
+                }
+            },
+            scales: {
+                y: { beginAtZero: true, max: 1.0 }
+            }
+        }
+    });
+}
+
+document.addEventListener("DOMContentLoaded", loadTrainingMetrics);
+</script>
   <!-- ===================== Recent Cycles ===================== -->
   <h3>Recent Signal Cycles</h3>
   <table>
