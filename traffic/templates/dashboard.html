@@ -1,239 +1,350 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Smart Traffic Controller Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 40px; }
-    .chart-container { width: 45%; display: inline-block; margin-right: 4%; vertical-align: top; }
-    .low { color: green; font-weight: bold; }
-    .medium { color: orange; font-weight: bold; }
-    .high { color: red; font-weight: bold; }
-    table { border-collapse: collapse; margin-top: 20px; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
-    th { background-color: #f2f2f2; }
-    .chart-container canvas {
-      background: #fff;
-      border-radius: 10px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-      padding: 10px;
-    }
-  </style>
-</head>
-<body>
-  <h2>🚦 Smart Traffic Light Controller</h2>
-  <p>Dynamic signal timing with predictive queue analysis (EMA, Lane-Aware)</p>
+{% extends "base.html" %}
+{% load static %}
 
-  <!-- ===================== Green Time ===================== -->
-  <h3>Current Green Time Allocation</h3>
-  <ul id="green-time-list">
-    {% for inter, alloc in results.items %}
-      <li><strong>{{ inter }}</strong>:
-        {% for dir, time in alloc.items %}
-          {{ dir }} → {{ time }}s&nbsp;
-        {% endfor %}
-      </li>
-    {% endfor %}
+{% block title %}Traffic Control Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <h2 class="text-center mb-4">🚦 Smart Traffic Control Dashboard</h2>
+
+  <!-- Tabs -->
+  <ul class="nav nav-tabs" id="dashboardTabs" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#predictedQueue">Predicted Queue</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#mlPerformance">ML Model Performance</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#signalState">Signal State</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#flowStats">Flow Stats</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#historicalLogs">Historical Logs</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#syncOverview">Synchronization Overview</button></li>
+
   </ul>
 
-  <!-- ===================== Prediction Charts ===================== -->
-  <h3>Predicted Queue (EMA per Direction + Lane)</h3>
-  <div id="prediction-charts"></div>
+  <div class="tab-content mt-4">
 
-  <div class="card mt-4">
-    <h5 class="card-title text-center">ML Model Performance</h5>
-    <canvas id="mlMetricsChart" height="100"></canvas>
+    <!-- Tab 1: Predicted Queue -->
+    <div class="tab-pane fade show active" id="predictedQueue">
+      <h5>Predicted Queue per Intersection (EMA + ML)</h5>
+      <canvas id="queueChart" height="120"></canvas>
+    </div>
+
+    <!-- Tab 2: ML Model Performance -->
+    <div class="tab-pane fade" id="mlPerformance">
+      <h5>ML Training Metrics (MAE & R²)</h5>
+      <canvas id="metricsChart" height="120"></canvas>
+    </div>
+
+    <!-- Tab 3: Signal State -->
+    <div class="tab-pane fade" id="signalState">
+      <h5>Live Signal States (Green/Red with Remaining Time)</h5>
+      <table class="table table-striped text-center align-middle mt-3" id="signalStateTable">
+        <thead class="table-primary">
+          <tr>
+            <th>Intersection</th>
+            <th>Direction</th>
+            <th>Signal State</th>
+            <th>Remaining Time (s)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Tab 4: Flow Stats -->
+    <div class="tab-pane fade" id="flowStats">
+      <h5>Vehicle Flow per Intersection</h5>
+      <table class="table table-bordered text-center align-middle mt-3" id="flowStatsTable">
+        <thead class="table-success">
+          <tr>
+            <th>Intersection</th>
+            <th>Vehicles Passed</th>
+            <th>Avg Queue Length</th>
+            <th>Last Updated</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Tab 5: Historical Logs -->
+    <div class="tab-pane fade" id="historicalLogs">
+      <h5>Recent Signal Cycle History</h5>
+      <canvas id="historicalChart" height="120"></canvas>
+    </div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-async function loadTrainingMetrics() {
-    const res = await fetch("{% url 'training_metrics_api' %}");
-    const data = await res.json();
+</div>
 
-    const ctx = document.getElementById('mlMetricsChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: data.timestamps,
-            datasets: [
-                {
-                    label: 'MAE',
-                    data: data.mae,
-                    borderColor: 'rgb(255, 99, 132)',
-                    fill: false,
-                    tension: 0.3,
-                },
-                {
-                    label: 'R²',
-                    data: data.r2,
-                    borderColor: 'rgb(54, 162, 235)',
-                    fill: false,
-                    tension: 0.3,
-                },
-            ]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { position: 'top' },
-                title: {
-                    display: true,
-                    text: 'Model Accuracy Over Time (Last 10 Retrains)'
-                }
-            },
-            scales: {
-                y: { beginAtZero: true, max: 1.0 }
-            }
-        }
-    });
+<!-- Tab 5: Synchronization Overview -->
+<div class="tab-pane fade" id="syncOverview" role="tabpanel">
+  <h5 class="mt-3">Synchronization Overview (Offsets relative to master)</h5>
+
+  <div class="row mt-2">
+    <div class="col-md-6">
+      <div id="sync-table-container" class="table-responsive">
+        <!-- table populated by JS -->
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <canvas id="syncOffsetChart" height="300"></canvas>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ==========================
+// Global Chart Instances
+// ==========================
+let queueChart, metricsChart, historicalChart;
+
+// ==========================
+// Fetch Data
+// ==========================
+function fetchAllData() {
+  fetch("{% url 'dashboard_data_api' %}")
+    .then(r => r.json())
+    .then(data => updateQueueChart(data.predictions));
+
+  fetch("{% url 'training_metrics_api' %}")
+    .then(r => r.json())
+    .then(data => updateMetricsChart(data));
+
+  fetch("{% url 'signal_state' %}")
+    .then(r => r.json())
+    .then(data => updateSignalStateTable(data));
+
+  fetch("{% url 'flow_stats' %}")
+    .then(r => r.json())
+    .then(data => updateFlowStatsTable(data));
+
+  fetch("{% url 'historical_logs' %}")
+    .then(r => r.json())
+    .then(data => updateHistoricalChart(data));
 }
 
-document.addEventListener("DOMContentLoaded", loadTrainingMetrics);
-</script>
-  <!-- ===================== Recent Cycles ===================== -->
-  <h3>Recent Signal Cycles</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Intersection</th>
-        <th>Direction</th>
-        <th>Green Time (s)</th>
-        <th>Timestamp</th>
-      </tr>
-    </thead>
-    <tbody id="cycle-table-body">
-      {% for c in cycles %}
-        <tr>
-          <td>{{ c.intersection.name }}</td>
-          <td>{{ c.direction }}</td>
-          <td>{{ c.green_time }}</td>
-          <td>{{ c.cycle_timestamp|date:"M. d, Y, P" }}</td>
+// ==========================
+// Predicted Queue Chart
+// ==========================
+function updateQueueChart(predictions) {
+  const ctx = document.getElementById('queueChart').getContext('2d');
+  if (queueChart) queueChart.destroy();
+
+  const labels = new Set();
+  const datasets = [];
+
+  Object.entries(predictions).forEach(([intersection, lanes]) => {
+    Object.keys(lanes).forEach(l => labels.add(l));
+    datasets.push({
+      label: intersection,
+      data: Object.values(lanes),
+      borderWidth: 2,
+      backgroundColor: `hsl(${Math.random()*360}, 70%, 60%)`
+    });
+  });
+
+  queueChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: [...labels],
+      datasets
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+}
+
+// ==========================
+// ML Metrics Chart
+// ==========================
+function updateMetricsChart(data) {
+  const ctx = document.getElementById('metricsChart').getContext('2d');
+  if (metricsChart) metricsChart.destroy();
+
+  metricsChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.timestamps,
+      datasets: [
+        {
+          label: 'MAE',
+          data: data.mae,
+          borderColor: 'red',
+          borderWidth: 2,
+          fill: false,
+        },
+        {
+          label: 'R²',
+          data: data.r2,
+          borderColor: 'green',
+          borderWidth: 2,
+          fill: false,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: { y: { beginAtZero: true } },
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+}
+
+// ==========================
+// Signal State Table
+// ==========================
+function updateSignalStateTable(data) {
+  const tbody = document.querySelector("#signalStateTable tbody");
+  tbody.innerHTML = "";
+  Object.entries(data).forEach(([intersection, dirs]) => {
+    Object.entries(dirs).forEach(([dir, info]) => {
+      const colorClass = info.state === 'green' ? 'table-success' : 'table-danger';
+      tbody.innerHTML += `
+        <tr class="${colorClass}">
+          <td>${intersection}</td>
+          <td>${dir}</td>
+          <td><strong>${info.state.toUpperCase()}</strong></td>
+          <td>${info.remaining_time}</td>
         </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      `;
+    });
+  });
+}
 
-  <script>
-  const charts = {}; // to store chart instances
+// ==========================
+// Flow Stats Table
+// ==========================
+function updateFlowStatsTable(data) {
+  const tbody = document.querySelector("#flowStatsTable tbody");
+  tbody.innerHTML = "";
+  Object.entries(data).forEach(([intersection, stats]) => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${intersection}</td>
+        <td>${stats.vehicles_passed}</td>
+        <td>${stats.avg_queue_length}</td>
+        <td>${new Date(stats.timestamp).toLocaleTimeString()}</td>
+      </tr>
+    `;
+  });
+}
 
-  function getColor(value) {
-    if (value < 50) return 'green';
-    if (value < 120) return 'orange';
-    return 'red';
-  }
+// ==========================
+// Historical Logs Chart
+// ==========================
+function updateHistoricalChart(data) {
+  const ctx = document.getElementById('historicalChart').getContext('2d');
+  if (historicalChart) historicalChart.destroy();
 
-  async function fetchDashboardData() {
-    try {
-      const response = await fetch("{% url 'dashboard_data_api' %}");
-      const data = await response.json();
+  const labels = data.map(e => e.timestamp);
+  const greenTimes = data.map(e => e.green_time);
 
-      if (data.results && data.predictions) {
-        updateGreenTimes(data.results);
-        updatePredictions(data.predictions);
-        updateCycles(data.cycles);
-      } else {
-        console.warn("Incomplete data:", data);
-      }
-    } catch (err) {
-      console.error("Error fetching dashboard data:", err);
-    }
-  }
+  historicalChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Green Time (s)',
+        data: greenTimes,
+        borderColor: '#007bff',
+        borderWidth: 2,
+        fill: false,
+      }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+}
+async function loadSyncOverview() {
+  try {
+    const res = await fetch("{% url 'sync_status' %}");
+    if (!res.ok) throw new Error('Sync API error');
+    const payload = await res.json();
 
-  function updateGreenTimes(results) {
-    const ul = document.getElementById('green-time-list');
-    ul.innerHTML = '';
-    for (const inter in results) {
-      const li = document.createElement('li');
-      li.innerHTML = `<strong>${inter}</strong>: ` +
-        Object.entries(results[inter])
-          .map(([d, t]) => `${d} → ${t}s`)
-          .join(' | ');
-      ul.appendChild(li);
-    }
-  }
-
-  function updatePredictions(predictions) {
-    const container = document.getElementById('prediction-charts');
-    container.innerHTML = '';
-
-    let chartCount = 0;
-
-    for (const inter in predictions) {
-      const interData = predictions[inter];
-      if (!interData || Object.keys(interData).length === 0) continue;
-
-      const div = document.createElement('div');
-      div.className = 'chart-container';
-      div.innerHTML = `<canvas id="chart_${chartCount}"></canvas><ul></ul>`;
-      container.appendChild(div);
-
-      const labels = Object.keys(interData);
-      const values = Object.values(interData);
-      const colors = values.map(getColor);
-
-      // Display text-based congestion levels
-      const ul = div.querySelector('ul');
-      labels.forEach((lane, idx) => {
-        const val = values[idx];
-        let cls = val < 50 ? 'low' : val < 120 ? 'medium' : 'high';
-        const li = document.createElement('li');
-        li.className = cls;
-        li.textContent = `${lane} → ${val} vehicles (${cls.toUpperCase()})`;
-        ul.appendChild(li);
+    // Build table HTML
+    const tableContainer = document.getElementById('sync-table-container');
+    let html = '';
+    payload.groups.forEach(group => {
+      html += `<h6 class="mt-2">${group.name} (master: ${group.master})</h6>`;
+      html += `<table class="table table-sm table-bordered"><thead><tr>
+        <th>Intersection</th><th>Exists</th><th>Distance (m)</th><th>Travel Time (s)</th><th>Offset (s)</th>
+      </tr></thead><tbody>`;
+      group.rows.forEach(r => {
+        html += `<tr>
+          <td>${r.intersection}</td>
+          <td>${r.exists ? '✓' : '—'}</td>
+          <td>${r.distance_m}</td>
+          <td>${r.travel_time_s !== null ? r.travel_time_s : '—'}</td>
+          <td>${r.offset_s !== null ? r.offset_s : '—'}</td>
+        </tr>`;
       });
+      html += `</tbody></table>`;
+    });
+    tableContainer.innerHTML = html;
 
-      const ctx = document.getElementById(`chart_${chartCount}`).getContext('2d');
+    // Build single chart showing offsets grouped (flatten rows)
+    // labels = "Group: Intersection", data = offset_s (can be negative)
+    const labels = [];
+    const data = [];
+    const bg = [];
+    payload.groups.forEach((group, gi) => {
+      group.rows.forEach(r => {
+        labels.push(`${group.name}: ${r.intersection}`);
+        data.push(r.offset_s || 0);
+        // color by group
+        const hue = (gi * 80) % 360;
+        bg.push(`hsl(${hue} 70% 60% / 0.85)`);
+      });
+    });
 
-      // Destroy old chart if exists
-      if (charts[`chart_${chartCount}`]) {
-        charts[`chart_${chartCount}`].destroy();
-      }
-
-      charts[`chart_${chartCount}`] = new Chart(ctx, {
+    // create or update Chart.js horizontal bar (indexAxis: 'y')
+    const ctx = document.getElementById('syncOffsetChart').getContext('2d');
+    if (window.syncOffsetChart) {
+      window.syncOffsetChart.data.labels = labels;
+      window.syncOffsetChart.data.datasets[0].data = data;
+      window.syncOffsetChart.data.datasets[0].backgroundColor = bg;
+      window.syncOffsetChart.update();
+    } else {
+      window.syncOffsetChart = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: labels,
+          labels,
           datasets: [{
-            label: 'Predicted Vehicle Count (EMA per Lane)',
-            data: values,
-            backgroundColor: colors,
-            borderWidth: 1
+            label: 'Offset (s)',
+            data,
+            backgroundColor: bg,
           }]
         },
         options: {
+          indexAxis: 'y',
           responsive: true,
-          scales: { y: { beginAtZero: true } },
+          scales: {
+            x: {
+              title: { display: true, text: 'Offset (seconds) relative to master' },
+              ticks: { beginAtZero: true }
+            }
+          },
           plugins: {
-            title: { display: true, text: inter },
-            legend: { display: false }
+            tooltip: {
+              callbacks: {
+                label: ctx => ` ${ctx.parsed.x} s`
+              }
+            }
           }
         }
       });
-
-      chartCount++;
     }
+  } catch (err) {
+    console.error("Failed to load sync overview:", err);
   }
+}
 
-  function updateCycles(cycles) {
-    const tbody = document.getElementById('cycle-table-body');
-    tbody.innerHTML = '';
-    cycles.forEach(c => {
-      const row = document.createElement('tr');
-      row.innerHTML = `
-        <td>${c.intersection}</td>
-        <td>${c.direction}</td>
-        <td>${c.green_time}</td>
-        <td>${c.timestamp}</td>
-      `;
-      tbody.appendChild(row);
-    });
-  }
-
-  // Initial load + refresh every 10 seconds
-  fetchDashboardData();
-  setInterval(fetchDashboardData, 10000);
+// initial load + periodic refresh (30s)
+document.addEventListener('DOMContentLoaded', () => {
+  loadSyncOverview();
+  setInterval(loadSyncOverview, 30000);
+});
+// ==========================
+// Auto Refresh
+// ==========================
+fetchAllData();
+setInterval(fetchAllData, 10000);
 </script>
-
-</body>
-</html>
+{% endblock %}

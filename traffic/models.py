@@ -51,11 +51,14 @@ class SignalCycle(models.Model):
 class MLTrainingLog(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    status = models.CharField(max_length=20, choices=[
-        ("running", "Running"),
-        ("success", "Success"),
-        ("failed", "Failed"),
-    ])
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ("running", "Running"),
+            ("success", "Success"),
+            ("failed", "Failed"),
+        ],
+    )
     mae = models.FloatField(null=True, blank=True)
     r2 = models.FloatField(null=True, blank=True)
     error_message = models.TextField(blank=True, null=True)
