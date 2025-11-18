@@ -18,14 +18,20 @@ def get_mode(request):
 def dashboard_view(request):
     mode = get_mode(request)
 
-    controller = DynamicSignalController()
-    predictor = QueuePredictor()
+    controller = DynamicSignalController(mode=mode)
+    predictor = QueuePredictor(mode=mode)
 
     results = controller.run_for_all()
-    predictions = predictor.run_for_all()
+    ml_preds = predictor.ml.run_for_all() if predictor.ml.is_available() else {}
+    ema_preds = predictor.ema.run_for_all()
 
     # Serialize predictions safely
-    predictions_json = mark_safe(json.dumps(predictions))
+    predictions_combined = {}
+    for inter in results.keys():
+        predictions_combined[inter] = {
+            "ML": ml_preds.get(inter, {}),
+            "EMA": ema_preds.get(inter, {}),
+        }
 
     latest_cycles = SignalCycle.objects.order_by("-cycle_timestamp")[:20]
 
@@ -34,8 +40,7 @@ def dashboard_view(request):
         "dashboard.html",
         {
             "results": results,
-            "predictions_json": predictions_json,
-            "cycles": latest_cycles,
+            "predictions": predictions_combined,
             "mode": mode,
         },
     )
@@ -49,7 +54,7 @@ def dashboard_data_api(request):
 
     results = controller.run_for_all()
     ml_preds = (
-        predictor.ml.run_for_all(mode=mode) if predictor.ml.is_available() else {}
+        predictor.ml.run_for_all() if predictor.ml.is_available() else {}
     )
     ema_preds = predictor.ema.run_for_all()
 

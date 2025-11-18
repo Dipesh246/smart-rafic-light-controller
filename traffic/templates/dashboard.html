@@ -9,10 +9,11 @@
   <div class="d-flex justify-content-end mb-3 align-items-center">
     <label class="me-2 fw-bold">Traffic Mode:</label>
     <select class="form-select w-auto" id="trafficModeToggle">
-      <option value="normal" selected>Normal</option>
-      <option value="peak">Peak</option>
+      <option value="normal" {% if mode == "normal" %}selected{% endif %}>Normal</option>
+      <option value="peak" {% if mode == "peak" %}selected{% endif %}>Peak</option>
     </select>
   </div>
+
   <!-- Tabs -->
   <ul class="nav nav-tabs" id="dashboardTabs" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#predictedQueue">Predicted Queue</button></li>
@@ -21,26 +22,24 @@
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#flowStats">Flow Stats</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#historicalLogs">Historical Logs</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#syncOverview">Synchronization Overview</button></li>
-
   </ul>
 
   <div class="tab-content mt-4">
-
-    <!-- Tab 1: Predicted Queue -->
+    <!-- Predicted Queue -->
     <div class="tab-pane fade show active" id="predictedQueue">
       <h5>Predicted Queue per Intersection (EMA + ML)</h5>
-      <canvas id="queueChart" height="120"></canvas>
+      <canvas id="queueChart" height="180"></canvas>
     </div>
 
-    <!-- Tab 2: ML Model Performance -->
+    <!-- ML Model Performance -->
     <div class="tab-pane fade" id="mlPerformance">
       <h5>ML Training Metrics (MAE & R²)</h5>
       <canvas id="metricsChart" height="120"></canvas>
     </div>
 
-    <!-- Tab 3: Signal State -->
+    <!-- Signal State -->
     <div class="tab-pane fade" id="signalState">
-      <h5>Live Signal States (Green/Red with Remaining Time)</h5>
+      <h5>Live Signal States</h5>
       <table class="table table-striped text-center align-middle mt-3" id="signalStateTable">
         <thead class="table-primary">
           <tr>
@@ -54,7 +53,7 @@
       </table>
     </div>
 
-    <!-- Tab 4: Flow Stats -->
+    <!-- Flow Stats -->
     <div class="tab-pane fade" id="flowStats">
       <h5>Vehicle Flow per Intersection</h5>
       <table class="table table-bordered text-center align-middle mt-3" id="flowStatsTable">
@@ -70,27 +69,23 @@
       </table>
     </div>
 
-    <!-- Tab 5: Historical Logs -->
+    <!-- Historical Logs -->
     <div class="tab-pane fade" id="historicalLogs">
       <h5>Recent Signal Cycle History</h5>
-      <canvas id="historicalChart" height="120"></canvas>
+      <canvas id="historicalChart" height="180"></canvas>
     </div>
-  </div>
-</div>
 
-<!-- Tab 5: Synchronization Overview -->
-<div class="tab-pane fade" id="syncOverview" role="tabpanel">
-  <h5 class="mt-3">Synchronization Overview (Offsets relative to master)</h5>
-
-  <div class="row mt-2">
-    <div class="col-md-6">
-      <div id="sync-table-container" class="table-responsive">
-        <!-- table populated by JS -->
+    <!-- Synchronization Overview -->
+    <div class="tab-pane fade" id="syncOverview">
+      <h5 class="mt-3">Synchronization Overview (Offsets relative to master)</h5>
+      <div class="row mt-2">
+        <div class="col-md-6">
+          <div id="sync-table-container" class="table-responsive"></div>
+        </div>
+        <div class="col-md-6">
+          <canvas id="syncOffsetChart" height="300"></canvas>
+        </div>
       </div>
-    </div>
-
-    <div class="col-md-6">
-      <canvas id="syncOffsetChart" height="300"></canvas>
     </div>
   </div>
 </div>
@@ -99,22 +94,24 @@
 {% block extra_scripts %}
 <script>
 // ==========================
-// Global Chart Instances
+// Global
 // ==========================
 let queueChart, metricsChart, historicalChart;
-let selectedMode = "normal";
+let selectedMode = "{{ mode }}";
 
+// Mode toggle
 document.getElementById("trafficModeToggle").addEventListener("change", (e) => {
   selectedMode = e.target.value;
-  fetchAllData(); // reload charts for new mode
+  fetchAllData();
 });
+
 // ==========================
-// Fetch Data
+// Fetch All Data
 // ==========================
 function fetchAllData() {
   fetch("{% url 'dashboard_data_api' %}?mode=" + selectedMode)
     .then(r => r.json())
-    .then(data => updateQueueChart(data.predictions));
+    .then(data => updateQueueChart(data.predictions, data.ml_predictions, data.ema_predictions));
 
   fetch("{% url 'training_metrics_api' %}?mode=" + selectedMode)
     .then(r => r.json())
@@ -131,35 +128,116 @@ function fetchAllData() {
   fetch("{% url 'historical_logs' %}?mode=" + selectedMode)
     .then(r => r.json())
     .then(data => updateHistoricalChart(data));
+
+  loadSyncOverview();
 }
 
 // ==========================
-// Predicted Queue Chart
+// Predicted Queue Chart (EMA + ML)
 // ==========================
 function updateQueueChart(predictions) {
-  const ctx = document.getElementById('queueChart').getContext('2d');
-  if (queueChart) queueChart.destroy();
+    const ctx = document.getElementById('queueChart').getContext('2d');
+    if (queueChart) queueChart.destroy();
 
-  const labels = new Set();
-  const datasets = [];
+    const directions = ["N", "E", "S", "W"];
+    const lanes = ["straight", "left", "right"];
+    const labels = [];
 
-  Object.entries(predictions).forEach(([intersection, lanes]) => {
-    Object.keys(lanes).forEach(l => labels.add(l));
-    datasets.push({
-      label: intersection,
-      data: Object.values(lanes),
-      borderWidth: 2,
-      backgroundColor: `hsl(${Math.random()*360}, 70%, 60%)`
+    // Build X-axis labels with spacing between directions
+    directions.forEach(dir => {
+        lanes.forEach(lane => {
+            labels.push(`${dir}-${lane}`);
+        });
+        labels.push(''); // empty label as visual gap between directions
+    });
+
+    const intersections = Object.keys(predictions);
+    const intersectionColors = [
+        "#007bff", "#28a745", "#ffc107", "#dc3545",
+        "#6f42c1", "#17a2b8", "#fd7e14", "#20c997"
+    ];
+
+    const datasets = intersections.map((inter, idx) => {
+        // Map predictions to X-axis labels
+        const data = labels.map(label => {
+            return label && predictions[inter][label] ? predictions[inter][label] : 0;
+        });
+
+        return {
+            label: inter,
+            data: data,
+            backgroundColor: intersectionColors[idx % intersectionColors.length],
+            borderColor: "#000",
+            borderWidth: 1
+        };
+    });
+
+    queueChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 18, padding: 8 } },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            const lane = ctx.label || '';
+                            return `${ctx.dataset.label} - ${lane}: ${ctx.raw}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: false,
+                    title: { display: true, text: "Direction + Lane" },
+                    ticks: { maxRotation: 45, minRotation: 30 }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: "Predicted Queue Length" }
+                }
+            }
+        }
+    });
+}
+
+
+// ==========================
+// Signal State Table (soft colors)
+// ==========================
+function updateSignalStateTable(data) {
+  const tbody = document.querySelector("#signalStateTable tbody");
+  tbody.innerHTML = "";
+  Object.entries(data).forEach(([inter, dirs]) => {
+    Object.entries(dirs).forEach(([dir, info]) => {
+      const bgColor = info.state === 'green' ? 'rgba(144,238,144,0.4)' : 'rgba(255,182,193,0.4)';
+      tbody.innerHTML += `
+        <tr style="background-color:${bgColor}">
+          <td>${inter}</td>
+          <td>${dir}</td>
+          <td><strong>${info.state.toUpperCase()}</strong></td>
+          <td>${info.remaining_time}</td>
+        </tr>`;
     });
   });
+}
 
-  queueChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: [...labels],
-      datasets
-    },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+// ==========================
+// Flow Stats
+// ==========================
+function updateFlowStatsTable(data) {
+  const tbody = document.querySelector("#flowStatsTable tbody");
+  tbody.innerHTML = "";
+  Object.entries(data).forEach(([inter, stats]) => {
+    tbody.innerHTML += `
+      <tr>
+        <td>${inter}</td>
+        <td>${stats.vehicles_passed}</td>
+        <td>${stats.avg_queue_length}</td>
+        <td>${new Date(stats.timestamp).toLocaleTimeString()}</td>
+      </tr>`;
   });
 }
 
@@ -175,71 +253,16 @@ function updateMetricsChart(data) {
     data: {
       labels: data.timestamps,
       datasets: [
-        {
-          label: 'MAE',
-          data: data.mae,
-          borderColor: 'red',
-          borderWidth: 2,
-          fill: false,
-        },
-        {
-          label: 'R²',
-          data: data.r2,
-          borderColor: 'green',
-          borderWidth: 2,
-          fill: false,
-        }
+        { label: 'MAE', data: data.mae, borderColor: 'red', borderWidth: 2, fill: false },
+        { label: 'R²', data: data.r2, borderColor: 'green', borderWidth: 2, fill: false }
       ]
     },
-    options: {
-      responsive: true,
-      scales: { y: { beginAtZero: true } },
-      plugins: { legend: { position: 'bottom' } }
-    }
+    options: { responsive: true, scales: { y: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
   });
 }
 
 // ==========================
-// Signal State Table
-// ==========================
-function updateSignalStateTable(data) {
-  const tbody = document.querySelector("#signalStateTable tbody");
-  tbody.innerHTML = "";
-  Object.entries(data).forEach(([intersection, dirs]) => {
-    Object.entries(dirs).forEach(([dir, info]) => {
-      const colorClass = info.state === 'green' ? 'table-success' : 'table-danger';
-      tbody.innerHTML += `
-        <tr class="${colorClass}">
-          <td>${intersection}</td>
-          <td>${dir}</td>
-          <td><strong>${info.state.toUpperCase()}</strong></td>
-          <td>${info.remaining_time}</td>
-        </tr>
-      `;
-    });
-  });
-}
-
-// ==========================
-// Flow Stats Table
-// ==========================
-function updateFlowStatsTable(data) {
-  const tbody = document.querySelector("#flowStatsTable tbody");
-  tbody.innerHTML = "";
-  Object.entries(data).forEach(([intersection, stats]) => {
-    tbody.innerHTML += `
-      <tr>
-        <td>${intersection}</td>
-        <td>${stats.vehicles_passed}</td>
-        <td>${stats.avg_queue_length}</td>
-        <td>${new Date(stats.timestamp).toLocaleTimeString()}</td>
-      </tr>
-    `;
-  });
-}
-
-// ==========================
-// Historical Logs Chart
+// Historical Chart
 // ==========================
 function updateHistoricalChart(data) {
   const ctx = document.getElementById('historicalChart').getContext('2d');
@@ -250,26 +273,21 @@ function updateHistoricalChart(data) {
 
   historicalChart = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Green Time (s)',
-        data: greenTimes,
-        borderColor: '#007bff',
-        borderWidth: 2,
-        fill: false,
-      }]
-    },
+    data: { labels, datasets: [{ label: 'Green Time (s)', data: greenTimes, borderColor: '#007bff', borderWidth: 2, fill: false }] },
     options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
   });
 }
+
+// ==========================
+// Synchronization Overview
+// ==========================
 async function loadSyncOverview() {
   try {
     const res = await fetch("{% url 'sync_status' %}");
     if (!res.ok) throw new Error('Sync API error');
     const payload = await res.json();
 
-    // Build table HTML
+    // Table
     const tableContainer = document.getElementById('sync-table-container');
     let html = '';
     payload.groups.forEach(group => {
@@ -290,8 +308,7 @@ async function loadSyncOverview() {
     });
     tableContainer.innerHTML = html;
 
-    // Build single chart showing offsets grouped (flatten rows)
-    // labels = "Group: Intersection", data = offset_s (can be negative)
+    // Offset Chart
     const labels = [];
     const data = [];
     const bg = [];
@@ -299,13 +316,11 @@ async function loadSyncOverview() {
       group.rows.forEach(r => {
         labels.push(`${group.name}: ${r.intersection}`);
         data.push(r.offset_s || 0);
-        // color by group
         const hue = (gi * 80) % 360;
         bg.push(`hsl(${hue} 70% 60% / 0.85)`);
       });
     });
 
-    // create or update Chart.js horizontal bar (indexAxis: 'y')
     const ctx = document.getElementById('syncOffsetChart').getContext('2d');
     if (window.syncOffsetChart) {
       window.syncOffsetChart.data.labels = labels;
@@ -315,47 +330,25 @@ async function loadSyncOverview() {
     } else {
       window.syncOffsetChart = new Chart(ctx, {
         type: 'bar',
-        data: {
-          labels,
-          datasets: [{
-            label: 'Offset (s)',
-            data,
-            backgroundColor: bg,
-          }]
-        },
+        data: { labels, datasets: [{ label: 'Offset (s)', data, backgroundColor: bg }] },
         options: {
           indexAxis: 'y',
           responsive: true,
-          scales: {
-            x: {
-              title: { display: true, text: 'Offset (seconds) relative to master' },
-              ticks: { beginAtZero: true }
-            }
-          },
-          plugins: {
-            tooltip: {
-              callbacks: {
-                label: ctx => ` ${ctx.parsed.x} s`
-              }
-            }
-          }
+          scales: { x: { title: { display: true, text: 'Offset (s) relative to master' }, ticks: { beginAtZero: true } } },
+          plugins: { tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.x} s` } } }
         }
       });
     }
-  } catch (err) {
-    console.error("Failed to load sync overview:", err);
-  }
+  } catch (err) { console.error("Failed to load sync overview:", err); }
 }
 
-// initial load + periodic refresh (30s)
+// ==========================
+// Initial Load & Refresh
+// ==========================
 document.addEventListener('DOMContentLoaded', () => {
-  loadSyncOverview();
+  fetchAllData();
+  setInterval(fetchAllData, 10000);
   setInterval(loadSyncOverview, 30000);
 });
-// ==========================
-// Auto Refresh
-// ==========================
-fetchAllData();
-setInterval(fetchAllData, 10000);
 </script>
 {% endblock %}
