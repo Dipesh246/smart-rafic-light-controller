@@ -1,15 +1,9 @@
 from traffic.models import Intersection, TrafficData, SignalCycle
 from django.utils import timezone
-from datetime import datetime
 import numpy as np
-import pandas as pd
 from collections import defaultdict
-from .constants import DIRECTIONS, LANES, LANE_WEIGHTS, LANE_FLOW_RATES
+from .constants import DIRECTIONS, LANES, LANE_WEIGHTS
 from .ml_predictor import MLQueuePredictor
-import joblib, os
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error
 
 
 class DynamicSignalController:
@@ -17,13 +11,14 @@ class DynamicSignalController:
     Weighted Round Robin-based dynamic traffic signal timing.
     """
 
-    def __init__(self, cycle_time: int = 60, min_green: int = 5):
+    def __init__(self, cycle_time: int = 60, min_green: int = 5, mode: str = "normal"):
         """
         :param cycle_time: Total duration of one complete cycle (sec)
         :param min_green: Minimum green duration for any direction (sec)
         """
         self.cycle_time = cycle_time
         self.min_green = min_green
+        self.mode = "peak" if mode == "peak" else "normal"
 
     def compute_for_intersection(self, intersection: Intersection):
         """
@@ -35,6 +30,7 @@ class DynamicSignalController:
             lane_data = TrafficData.objects.filter(
                 intersection=intersection,
                 direction=direction,
+                mode=self.mode,
             ).order_by("-timestamp")[:3]
 
             # Aggregate by lane
@@ -71,6 +67,7 @@ class DynamicSignalController:
                 direction=direction,
                 green_time=green_time,
                 cycle_timestamp=timezone.now(),
+                mode=self.mode,
             )
 
         return allocation
@@ -90,21 +87,22 @@ class QueuePredictorEMA:
     Predicts upcoming traffic load per direction using Exponential Moving Average (EMA).
     """
 
-    def __init__(self, alpha: float = 0.3):
+    def __init__(self, alpha: float = 0.3, mode: str = "normal"):
         self.alpha = alpha
+        self.mode = "peak" if mode == "peak" else "normal"
 
     def predict_for_intersection(self, intersection: Intersection, limit: int = 10):
         """
         Predict queue size per direction using EMA based on recent data points.
         """
-        directions = ["N", "E", "S", "W"]
-        lanes = ["straight", "left", "right"]
+        directions = DIRECTIONS
+        lanes = LANES
         predictions = {}
 
         for d in directions:
             for lane in lanes:
                 history = TrafficData.objects.filter(
-                    intersection=intersection, direction=d, lane_type=lane
+                    intersection=intersection, direction=d, lane_type=lane, mode=self.mode
                 ).order_by("-timestamp")[:limit]
 
                 if not history:
@@ -135,9 +133,10 @@ class QueuePredictor:
     Prefers ML; falls back to EMA if unavailable.
     """
 
-    def __init__(self, alpha=0.3):
-        self.ml = MLQueuePredictor()
-        self.ema = QueuePredictorEMA(alpha=alpha)
+    def __init__(self, alpha=0.3, mode="normal"):
+        self.mode = "peak" if mode == "peak" else "normal"
+        self.ml = MLQueuePredictor(mode=mode)
+        self.ema = QueuePredictorEMA(alpha=alpha, mode=self.mode)
 
     def run_for_all(self):
         if self.ml.is_available():

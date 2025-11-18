@@ -10,7 +10,14 @@ from traffic.algorithm import DynamicSignalController, QueuePredictor
 from traffic.models import SignalCycle, MLTrainingLog, Intersection, TrafficData
 
 
+def get_mode(request):
+    mode = request.GET.get("mode", "normal")
+    return "peak" if mode == "peak" else "normal"
+
+
 def dashboard_view(request):
+    mode = get_mode(request)
+
     controller = DynamicSignalController()
     predictor = QueuePredictor()
 
@@ -29,30 +36,37 @@ def dashboard_view(request):
             "results": results,
             "predictions_json": predictions_json,
             "cycles": latest_cycles,
+            "mode": mode,
         },
     )
 
 
 def dashboard_data_api(request):
-    controller = DynamicSignalController()
-    predictor = QueuePredictor()
+    mode = get_mode(request)
+
+    controller = DynamicSignalController(mode=mode)
+    predictor = QueuePredictor(mode=mode)
 
     results = controller.run_for_all()
-
-    ml_preds = predictor.ml.run_for_all() if predictor.ml.is_available() else {}
+    ml_preds = (
+        predictor.ml.run_for_all(mode=mode) if predictor.ml.is_available() else {}
+    )
     ema_preds = predictor.ema.run_for_all()
 
     predictions = predictor.run_for_all()
 
-    # Optional: simulate live fluctuations
+    # Simulate fluctuations
     for inter, lanes in predictions.items():
         for lane, count in lanes.items():
             delta = random.randint(-3, 3)
             predictions[inter][lane] = max(count + delta, 0)
 
-    latest_cycles = SignalCycle.objects.order_by("-cycle_timestamp")[:20]
+    latest_cycles = SignalCycle.objects.filter(mode=mode).order_by("-cycle_timestamp")[
+        :20
+    ]
 
     data = {
+        "mode": mode,
         "results": results,
         "predictions": predictions,
         "ml_predictions": ml_preds,
@@ -84,13 +98,14 @@ def training_metrics_api(request):
 
 
 def signal_state_api(request):
+    mode = get_mode(request)
     data = {}
     current_time = now()
 
     for inter in Intersection.objects.all():
         inter_data = {}
         latest_cycle = (
-            SignalCycle.objects.filter(intersection=inter)
+            SignalCycle.objects.filter(intersection=inter, mode=mode)
             .order_by("-cycle_timestamp")
             .first()
         )
@@ -118,12 +133,13 @@ def signal_state_api(request):
 
 
 def flow_stats_api(request):
+    mode = get_mode(request)
     data = {}
     current_time = now()
 
     for inter in Intersection.objects.all():
         stats = (
-            TrafficData.objects.filter(intersection=inter)
+            TrafficData.objects.filter(intersection=inter, mode=mode)
             .order_by("-timestamp")[:30]
             .aggregate(
                 avg_queue=Avg("vehicle_count"),
@@ -144,9 +160,12 @@ def flow_stats_api(request):
 
 
 def historical_logs_api(request):
-    logs = SignalCycle.objects.select_related("intersection").order_by(
-        "-cycle_timestamp"
-    )[:100]
+    mode = get_mode(request)
+    logs = (
+        SignalCycle.objects.filter(mode=mode)
+        .select_related("intersection")
+        .order_by("-cycle_timestamp")[:100]
+    )
 
     data = [
         {
@@ -163,7 +182,7 @@ def historical_logs_api(request):
 
 
 def synchronization_status_api(request):
-
+    mode = get_mode(request)
     # ---- CONFIG - tune this to match real geography ----
     # groups: ordered list along the corridor (upstream→downstream)
     groups = {
@@ -181,7 +200,7 @@ def synchronization_status_api(request):
     }
 
     # average assumed progression speed (km/h) for the platoon -> convert to m/s
-    avg_speed_kmph = 30.0
+    avg_speed_kmph = 40.0
     speed_m_s = avg_speed_kmph * 1000.0 / 3600.0
 
     output_groups = []
@@ -206,7 +225,7 @@ def synchronization_status_api(request):
             b = nodes[i + 1]
             d = distances_m.get((a, b)) or distances_m.get((b, a)) or 0
             cum += d
-            cumulative[nodes[i + 1]] = cum
+            cumulative[b] = cum
         # handle nodes to the left (indices < master)
         cum = 0.0
         for i in range(idx_master, 0, -1):
@@ -214,24 +233,19 @@ def synchronization_status_api(request):
             b = nodes[i - 1]
             d = distances_m.get((a, b)) or distances_m.get((b, a)) or 0
             cum += d
-            cumulative[nodes[i - 1]] = -cum
+            cumulative[b] = -cum
         # master distance 0
         cumulative[master] = 0.0
 
         rows = []
         for node in nodes:
             dist_m = float(abs(cumulative.get(node, 0.0)))
-            travel_time_s = None
-            offset_s = None
-            if speed_m_s > 0:
-                travel_time_s = round(dist_m / speed_m_s, 1)
-                # offset is time difference from master; negative => arrives earlier than master
-                offset_s = int(round(cumulative.get(node, 0.0) / speed_m_s))
-            else:
-                travel_time_s = None
-                offset_s = None
-
-            # best-effort: if the intersection exists in DB, show it; else still return config row
+            travel_time_s = round(dist_m / speed_m_s, 1) if speed_m_s > 0 else None
+            offset_s = (
+                int(round(cumulative.get(node, 0.0) / speed_m_s))
+                if speed_m_s > 0
+                else None
+            )
             exists = Intersection.objects.filter(name__iexact=node).exists()
             rows.append(
                 {

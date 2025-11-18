@@ -7,6 +7,19 @@ from .algorithm import QueuePredictor, DynamicSignalController
 from .constants import DIRECTIONS, LANES
 from traffic.utils.ml_lock import ml_training_lock
 
+def detect_mode():
+    """
+    Detects mode based on REAL TIME.
+    - Peak hours only on weekdays (Sunday–Friday)
+    - 09–12 and 17–20
+    """
+    now = timezone.now()
+    weekday = now.weekday()    # 0 = Monday, 6 = Sunday
+    hour = now.hour
+
+    if weekday <= 5 and (9 <= hour <= 12 or 17 <= hour <= 20):
+        return "peak"
+    return "normal"
 
 @shared_task()
 def generate_traffic_data():
@@ -14,6 +27,10 @@ def generate_traffic_data():
     Generate realistic, bounded lane-based traffic data for each intersection.
     Keeps vehicle counts within [0, 50] to prevent unrealistic growth.
     """
+
+    mode = detect_mode()
+    print(f"🚦 Traffic Generation Mode: {mode}")
+
     intersections = Intersection.objects.all()
     timestamp = datetime.now()
 
@@ -21,13 +38,17 @@ def generate_traffic_data():
         for direction in DIRECTIONS:
             for lane in LANES:
                 # Simulate inflow and outflow
-                inflow = random.randint(0, 6)
-                outflow = random.randint(0, 4)
+                if mode == "peak":
+                    inflow = random.randint(4, 12)
+                    outflow = random.randint(0, 5)
+                else:
+                    inflow = random.randint(0, 6)
+                    outflow = random.randint(0, 4)
 
                 # Retrieve latest data for this direction-lane
                 last = (
                     TrafficData.objects.filter(
-                        intersection=inter, direction=direction, lane_type=lane
+                        intersection=inter, direction=direction, lane_type=lane, mode=mode
                     )
                     .order_by("-timestamp")
                     .first()
@@ -37,7 +58,8 @@ def generate_traffic_data():
                 new_count = current_count + inflow - outflow
 
                 # ✅ Clamp to realistic range (0–50)
-                new_count = max(0, min(new_count, 50))
+                max_cap = 100 if mode == "peak" else 50
+                new_count = max(0, min(new_count, max_cap))
 
                 TrafficData.objects.create(
                     intersection=inter,
@@ -45,6 +67,7 @@ def generate_traffic_data():
                     lane_type=lane,
                     vehicle_count=new_count,
                     timestamp=timestamp,
+                    mode=mode,
                 )
 
     print("✅ Lane-wise traffic data updated (bounded 0–50).")
@@ -54,8 +77,11 @@ def generate_traffic_data():
 
 @shared_task()
 def run_signal_algorithm():
+    mode = detect_mode()
     controller = DynamicSignalController()
     results = controller.run_for_all()
+
+    print(f"🚦 Signal Algorithm executed in {mode} mode")
     return results
 
 @shared_task(bind=True, name="traffic.tasks.retrain_queue_model")
@@ -65,6 +91,9 @@ def retrain_queue_model(self):
     - Prevents concurrent runs
     - Logs results in MLTrainingLog
     """
+    mode = detect_mode()
+    print(f"📘 ML Retraining for Mode: {mode}")
+
     log = MLTrainingLog.objects.create(status="running")
     start_time = time.time()
 
@@ -76,7 +105,7 @@ def retrain_queue_model(self):
             print("🚀 Starting ML model retraining...")
 
             result = subprocess.run(
-                [sys.executable, script_path],
+                [sys.executable, script_path, "--mode", mode],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

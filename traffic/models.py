@@ -30,6 +30,12 @@ class TrafficData(models.Model):
     vehicle_count = models.PositiveIntegerField(default=0)
     lane_type = models.CharField(max_length=10, choices=LANE_CHOICES)
     timestamp = models.DateTimeField(auto_now_add=True)
+    mode = models.CharField(
+        max_length=10,
+        choices=[("normal", "Normal"), ("peak", "Peak")],
+        default="normal",
+        help_text="Indicates whether this data is from normal or peak mode"
+    )
 
     class Meta:
         ordering = ["-timestamp"]
@@ -43,6 +49,7 @@ class SignalCycle(models.Model):
     direction = models.CharField(max_length=10)
     green_time = models.FloatField(help_text="Green signal time in seconds")
     cycle_timestamp = models.DateTimeField(auto_now_add=True)
+    mode = models.CharField(max_length=10, default="normal")
 
     def __str__(self):
         return f"{self.intersection.name} - {self.direction} ({self.green_time}s)"
@@ -62,6 +69,7 @@ class MLTrainingLog(models.Model):
     mae = models.FloatField(null=True, blank=True)
     r2 = models.FloatField(null=True, blank=True)
     error_message = models.TextField(blank=True, null=True)
+    mode = models.CharField(max_length=20, default="normal")
 
     class Meta:
         ordering = ["-started_at"]

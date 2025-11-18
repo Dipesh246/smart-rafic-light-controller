@@ -6,7 +6,13 @@
 {% block content %}
 <div class="container-fluid">
   <h2 class="text-center mb-4">🚦 Smart Traffic Control Dashboard</h2>
-
+  <div class="d-flex justify-content-end mb-3 align-items-center">
+    <label class="me-2 fw-bold">Traffic Mode:</label>
+    <select class="form-select w-auto" id="trafficModeToggle">
+      <option value="normal" selected>Normal</option>
+      <option value="peak">Peak</option>
+    </select>
+  </div>
   <!-- Tabs -->
   <ul class="nav nav-tabs" id="dashboardTabs" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#predictedQueue">Predicted Queue</button></li>
@@ -96,28 +102,33 @@
 // Global Chart Instances
 // ==========================
 let queueChart, metricsChart, historicalChart;
+let selectedMode = "normal";
 
+document.getElementById("trafficModeToggle").addEventListener("change", (e) => {
+  selectedMode = e.target.value;
+  fetchAllData(); // reload charts for new mode
+});
 // ==========================
 // Fetch Data
 // ==========================
 function fetchAllData() {
-  fetch("{% url 'dashboard_data_api' %}")
+  fetch("{% url 'dashboard_data_api' %}?mode=" + selectedMode)
     .then(r => r.json())
     .then(data => updateQueueChart(data.predictions));
 
-  fetch("{% url 'training_metrics_api' %}")
+  fetch("{% url 'training_metrics_api' %}?mode=" + selectedMode)
     .then(r => r.json())
     .then(data => updateMetricsChart(data));
 
-  fetch("{% url 'signal_state' %}")
+  fetch("{% url 'signal_state' %}?mode=" + selectedMode)
     .then(r => r.json())
     .then(data => updateSignalStateTable(data));
 
-  fetch("{% url 'flow_stats' %}")
+  fetch("{% url 'flow_stats' %}?mode=" + selectedMode)
     .then(r => r.json())
     .then(data => updateFlowStatsTable(data));
 
-  fetch("{% url 'historical_logs' %}")
+  fetch("{% url 'historical_logs' %}?mode=" + selectedMode)
     .then(r => r.json())
     .then(data => updateHistoricalChart(data));
 }

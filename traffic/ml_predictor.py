@@ -11,21 +11,25 @@ from traffic.models import Intersection, TrafficData
 # path to artifacts (adjust if different)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # project/traffic
 ARTIFACT_DIR = os.path.join(BASE_DIR, "traffic\ml_artifacts")
-MODEL_PATH = os.path.join(ARTIFACT_DIR, "rf_queue_model.joblib")
-LE_INTER_PATH = os.path.join(ARTIFACT_DIR, "le_intersection.joblib")
-LE_DIRLANE_PATH = os.path.join(ARTIFACT_DIR, "le_dirlane.joblib")
 
 
 class MLQueuePredictor:
-    def __init__(self):
+    def __init__(self, mode="normal"):
         # try to load artifacts; if missing, mark unavailable
+        self.mode = mode
         self.model = None
         self.le_inter = None
         self.le_dirlane = None
         try:
-            self.model = joblib.load(MODEL_PATH)
-            self.le_inter = joblib.load(LE_INTER_PATH)
-            self.le_dirlane = joblib.load(LE_DIRLANE_PATH)
+            model_path = os.path.join(ARTIFACT_DIR, mode, f"rf_queue_model_{mode}.joblib")
+            le_inter_path = os.path.join(ARTIFACT_DIR, mode, f"le_intersection_{mode}.joblib")
+            le_dirlane_path = os.path.join(ARTIFACT_DIR, mode, f"le_dirlane_{mode}.joblib")
+
+            self.model = joblib.load(model_path)
+            self.le_inter = joblib.load(le_inter_path)
+            self.le_dirlane = joblib.load(le_dirlane_path)
+            print(f"✅ Loaded ML model for mode '{mode}'")
+
         except Exception as e:
             # artifacts missing -> fallback behavior
             print("MLQueuePredictor init: could not load artifacts:", e)
@@ -74,18 +78,14 @@ class MLQueuePredictor:
                 # Get latest observed value
                 last = (
                     TrafficData.objects.filter(
-                        intersection=intersection, direction=d, lane_type=lane
+                        intersection=intersection, direction=d, lane_type=lane, mode=self.mode
                     )
                     .order_by("-timestamp")
                     .first()
                 )
 
-                if last:
-                    vc = last.vehicle_count
-                    ts = last.timestamp
-                else:
-                    vc = 0
-                    ts = timezone.localtime(timezone.now())
+                vc = last.vehicle_count if last else 0
+                ts = last.timestamp if last else timezone.localtime(timezone.now())
 
                 feat = self._build_feature_row(intersection.name, key, vc, ts)
                 X = np.array([feat], dtype=float)
@@ -97,9 +97,7 @@ class MLQueuePredictor:
                     pred = vc
 
                 # ✅ Clamp to realistic range
-                pred = max(0.0, min(pred, 50.0))
-
-                preds[key] = round(pred, 2)
+                preds[key] = round(max(0, min(pred, 50)), 2)
 
         return preds
 
