@@ -53,9 +53,7 @@ def dashboard_data_api(request):
     predictor = QueuePredictor(mode=mode)
 
     results = controller.run_for_all()
-    ml_preds = (
-        predictor.ml.run_for_all() if predictor.ml.is_available() else {}
-    )
+    ml_preds = predictor.ml.run_for_all() if predictor.ml.is_available() else {}
     ema_preds = predictor.ema.run_for_all()
 
     predictions = predictor.run_for_all()
@@ -102,37 +100,84 @@ def training_metrics_api(request):
     return JsonResponse(data)
 
 
+DIRECTIONS = ["N", "E", "S", "W"]
+LANES = ["straight", "left", "right"]
+VEHICLES_PER_SEC = 1  # Vehicles passing per lane when green
+
+
 def signal_state_api(request):
-    mode = get_mode(request)
-    data = {}
-    current_time = now()
+    try:
+        mode = get_mode(request)
+        current_time = now()
+        data = {}
 
-    for inter in Intersection.objects.all():
-        inter_data = {}
-        latest_cycle = (
-            SignalCycle.objects.filter(intersection=inter, mode=mode)
-            .order_by("-cycle_timestamp")
-            .first()
-        )
+        for inter in Intersection.objects.all():
+            inter_data = {}
+            latest_cycle = (
+                SignalCycle.objects.filter(intersection=inter, mode=mode)
+                .order_by("-cycle_timestamp")
+                .first()
+            )
 
-        if not latest_cycle:
-            continue
+            if not latest_cycle:
+                continue
 
-        for direction in ["N", "E", "S", "W"]:
-            if direction == latest_cycle.direction:
-                elapsed = (current_time - latest_cycle.cycle_timestamp).total_seconds()
-                remaining = max(round(latest_cycle.green_time - elapsed, 1), 0)
-                state = "green" if remaining > 0 else "red"
-            else:
-                state = "red"
-                remaining = 0
+            total_cycle_time = latest_cycle.green_time * 4  # rough full cycle
 
-            inter_data[direction] = {
-                "state": state,
-                "remaining_time": remaining,
-            }
+            for direction in DIRECTIONS:
+                # Determine state and remaining time
+                if direction == latest_cycle.direction:
+                    elapsed = (
+                        current_time - latest_cycle.cycle_timestamp
+                    ).total_seconds()
+                    remaining = max(round(latest_cycle.green_time - elapsed, 1), 0)
+                    state = "green" if remaining > 0 else "red"
+                else:
+                    # RED state
+                    elapsed = (
+                        current_time - latest_cycle.cycle_timestamp
+                    ).total_seconds()
+                    remaining = max(round(total_cycle_time - elapsed, 1), 0)
+                    state = "red"
+                    if remaining < 0:
+                        remaining = 0
 
-        data[inter.name] = inter_data
+                # Compute dynamic vehicle counts per lane
+                lane_counts = {}
+                for lane in LANES:
+                    last_data = (
+                        TrafficData.objects.filter(
+                            intersection=inter,
+                            direction=direction,
+                            lane_type=lane,
+                            mode=mode,
+                        )
+                        .order_by("-timestamp")
+                        .first()
+                    )
+                    last_count = last_data.vehicle_count if last_data else 0
+
+                    if state == "green":
+                        # Vehicles pass when green
+                        lane_counts[lane] = max(
+                            last_count - int(VEHICLES_PER_SEC * 1), 0
+                        )
+                    else:
+                        # Vehicles accumulate when red
+                        lane_counts[lane] = last_count + random.randint(0, 2)
+
+                inter_data[direction] = {
+                    "state": state,
+                    "remaining_time": remaining,
+                    "vehicle_count": lane_counts,
+                }
+
+            data[inter.name] = inter_data
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return JsonResponse({"error": str(e)}, status=500)
 
     return JsonResponse(data)
 

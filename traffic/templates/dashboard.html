@@ -46,6 +46,7 @@
             <th>Intersection</th>
             <th>Direction</th>
             <th>Signal State</th>
+            <th>Vehicle Counts</th>
             <th>Remaining Time (s)</th>
           </tr>
         </thead>
@@ -213,11 +214,17 @@ function updateSignalStateTable(data) {
   Object.entries(data).forEach(([inter, dirs]) => {
     Object.entries(dirs).forEach(([dir, info]) => {
       const bgColor = info.state === 'green' ? 'rgba(144,238,144,0.4)' : 'rgba(255,182,193,0.4)';
+       // Combine lane vehicle counts into a string
+      const vehicleCounts = Object.entries(info.vehicle_count)
+        .map(([lane, count]) => `${lane}: ${count}`)
+        .join(" | ");
+
       tbody.innerHTML += `
         <tr style="background-color:${bgColor}">
           <td>${inter}</td>
           <td>${dir}</td>
           <td><strong>${info.state.toUpperCase()}</strong></td>
+          <td>${vehicleCounts}</td>
           <td>${info.remaining_time}</td>
         </tr>`;
     });
