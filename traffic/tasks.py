@@ -1,5 +1,5 @@
 from celery import shared_task
-import os, sys, subprocess, traceback, time, random
+import os, sys, subprocess, traceback, time, random, pytz
 from datetime import datetime
 from django.utils import timezone
 from .models import Intersection, TrafficData, SignalCycle, MLTrainingLog
@@ -7,19 +7,23 @@ from .algorithm import QueuePredictor, DynamicSignalController
 from .constants import DIRECTIONS, LANES
 from traffic.utils.ml_lock import ml_training_lock
 
+
 def detect_mode():
     """
     Detects mode based on REAL TIME.
     - Peak hours only on weekdays (Sunday–Friday)
     - 09–12 and 17–20
     """
-    now = timezone.now()
-    weekday = now.weekday()    # 0 = Monday, 6 = Sunday
+    local_tz = pytz.timezone("Asia/Kathmandu")
+    now = timezone.now().astimezone(local_tz)
+
+    weekday = now.weekday()  # 0=Monday, 6=Sunday
     hour = now.hour
 
-    if weekday <= 5 and (9 <= hour <= 12 or 17 <= hour <= 20):
+    if weekday != 6 and (9 <= hour <= 12 or 17 <= hour <= 20):
         return "peak"
     return "normal"
+
 
 @shared_task()
 def generate_traffic_data():
@@ -48,7 +52,10 @@ def generate_traffic_data():
                 # Retrieve latest data for this direction-lane
                 last = (
                     TrafficData.objects.filter(
-                        intersection=inter, direction=direction, lane_type=lane, mode=mode
+                        intersection=inter,
+                        direction=direction,
+                        lane_type=lane,
+                        mode=mode,
                     )
                     .order_by("-timestamp")
                     .first()
@@ -74,7 +81,6 @@ def generate_traffic_data():
     return "Lane-based traffic data generated"
 
 
-
 @shared_task()
 def run_signal_algorithm():
     mode = detect_mode()
@@ -83,6 +89,7 @@ def run_signal_algorithm():
 
     print(f"🚦 Signal Algorithm executed in {mode} mode")
     return results
+
 
 @shared_task(bind=True, name="traffic.tasks.retrain_queue_model")
 def retrain_queue_model(self):
